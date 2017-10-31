@@ -342,7 +342,7 @@ func newHybiConn(config *Config, buf *bufio.ReadWriter, rwc io.ReadWriteCloser, 
 		frameReaderFactory: hybiFrameReaderFactory{buf.Reader},
 		frameWriterFactory: hybiFrameWriterFactory{
 			buf.Writer, request == nil},
-		PayloadType:        TextFrame,
+		PayloadType:        BinaryFrame,
 		defaultCloseStatus: closeStatusNormal}
 	ws.frameHandler = &hybiFrameHandler{conn: ws}
 	return ws
@@ -494,22 +494,22 @@ func (c *hybiServerHandshaker) ReadHandshake(buf *bufio.Reader, req *http.Reques
 	}
 	// HTTP version can be safely ignored.
 
-	// if strings.ToLower(req.Header.Get("Upgrade")) != "websocket" ||
-	// 	!strings.Contains(strings.ToLower(req.Header.Get("Connection")), "upgrade") {
-	// 	return http.StatusBadRequest, ErrNotWebSocket
-	// }
+	if strings.ToLower(req.Header.Get("Upgrade")) != "websocket" ||
+		!strings.Contains(strings.ToLower(req.Header.Get("Connection")), "upgrade") {
+		return http.StatusBadRequest, ErrNotWebSocket
+	}
 
-	// key := req.Header.Get("Sec-Websocket-Key")
-	// if key == "" {
-	// 	return http.StatusBadRequest, ErrChallengeResponse
-	// }
-	// version := req.Header.Get("Sec-Websocket-Version")
-	// switch version {
-	// case "13":
-	//	c.Version = ProtocolVersionHybi13
-	//default:
-	//		return http.StatusBadRequest, ErrBadWebSocketVersion
-	//}
+	key := req.Header.Get("Sec-Websocket-Key")
+	if key == "" {
+		return http.StatusBadRequest, ErrChallengeResponse
+	}
+	version := req.Header.Get("Sec-Websocket-Version")
+	switch version {
+	case "13":
+		c.Version = ProtocolVersionHybi13
+	default:
+		return http.StatusBadRequest, ErrBadWebSocketVersion
+	}
 	var scheme string
 	if req.TLS != nil {
 		scheme = "wss"
@@ -527,10 +527,10 @@ func (c *hybiServerHandshaker) ReadHandshake(buf *bufio.Reader, req *http.Reques
 			c.Protocol = append(c.Protocol, strings.TrimSpace(protocols[i]))
 		}
 	}
-	//c.accept, err = getNonceAccept([]byte(key))
-	//if err != nil {
-	//	return http.StatusInternalServerError, err
-	//}
+	c.accept, err = getNonceAccept([]byte(key))
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
 	return http.StatusSwitchingProtocols, nil
 }
 
@@ -559,8 +559,11 @@ func (c *hybiServerHandshaker) AcceptHandshake(buf *bufio.Writer) (err error) {
 	buf.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
 	buf.WriteString("Upgrade: websocket\r\n")
 	buf.WriteString("Connection: Upgrade\r\n")
-	buf.WriteString("Access-Control-Allow-Origin: " + c.Origin.String() + "\r\n")
-	buf.WriteString("Access-Control-Allow-Credentials: true\r\n")
+
+	if c.Origin != nil {
+		buf.WriteString("Access-Control-Allow-Origin: " + c.Origin.String() + "\r\n")
+		buf.WriteString("Access-Control-Allow-Credentials: true\r\n")
+	}
 
 	buf.WriteString("Sec-WebSocket-Accept: " + string(c.accept) + "\r\n")
 	if len(c.Protocol) > 0 {
